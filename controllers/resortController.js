@@ -371,20 +371,31 @@ exports.calculateAllHistory = (req, res) => {
         return res.status(500).json({ message: 'Data file not found' });
     }
 
-    // Use the virtual environment from environment variables or fallback to default
-    const pythonCommand = process.env.VIRTUAL_ENV 
-        ? path.join(process.env.VIRTUAL_ENV, 'bin', 'python3')
-        : 'python3';
+    // Use the correct Python path with pip installed packages
+    const pythonCommand = '/opt/venv/bin/python3';
     
-    console.log('Using Python command:', pythonCommand);
+    // First check if the Python command exists
+    exec(`which ${pythonCommand}`, (error, stdout, stderr) => {
+        if (error) {
+            console.error(`Python command not found: ${pythonCommand}`);
+            console.error(`Trying fallback to system Python...`);
+            
+            // Fallback to system Python with pip install
+            exec(`pip3 install pandas && python3 "${scriptPath}" "${startDate}" "${endDate}" "${country}"`, 
+                { cwd: path.join(__dirname, '..') }, 
+                handlePythonOutput);
+        } else {
+            console.log(`Found Python at: ${stdout.trim()}`);
+            
+            // Execute the Python script with the found Python command
+            exec(`${pythonCommand} "${scriptPath}" "${startDate}" "${endDate}" "${country}"`,  
+                { cwd: path.join(__dirname, '..') }, 
+                handlePythonOutput);
+        }
+    });
     
-    // Execute the Python script with proper error handling
-    exec(`${pythonCommand} "${scriptPath}" "${startDate}" "${endDate}" "${country}"`,  
-        { 
-            cwd: path.join(__dirname, '..'),
-            env: process.env  // Use the existing environment variables
-        }, (error, stdout, stderr) => {
-        
+    // Handle Python script output
+    function handlePythonOutput(error, stdout, stderr) {
         // Log all outputs for debugging
         console.log('Python stdout:', stdout);
         if (stderr) {
@@ -444,5 +455,5 @@ exports.calculateAllHistory = (req, res) => {
                 message: 'Error parsing snowfall data. Please try again.'
             });
         }
-    });
+    }
 };
