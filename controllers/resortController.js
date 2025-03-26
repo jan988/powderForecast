@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { stdout, stderr } = require('process');
 const { exec } = require('child_process');
+const os = require('os');
 
 
 
@@ -371,35 +372,30 @@ exports.calculateAllHistory = (req, res) => {
         return res.status(500).json({ message: 'Data file not found' });
     }
 
-    // Use the correct Python path with pip installed packages
-    const pythonCommand = '/opt/venv/bin/python3';
+    // Create a temporary directory for the virtual environment
+    const tempVenvDir = path.join(os.tmpdir(), 'temp_venv_' + Date.now());
+    console.log('Creating temporary virtual environment at:', tempVenvDir);
+
+    // Create a virtual environment and install pandas
+    const setupCommand = `python3 -m venv ${tempVenvDir} && 
+                         ${tempVenvDir}/bin/pip install pandas && 
+                         ${tempVenvDir}/bin/python "${scriptPath}" "${startDate}" "${endDate}" "${country}"`;
     
-    // First check if the Python command exists
-    exec(`which ${pythonCommand}`, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`Python command not found: ${pythonCommand}`);
-            console.error(`Trying fallback to system Python...`);
-            
-            // Fallback to system Python with pip install
-            exec(`pip3 install pandas && python3 "${scriptPath}" "${startDate}" "${endDate}" "${country}"`, 
-                { cwd: path.join(__dirname, '..') }, 
-                handlePythonOutput);
-        } else {
-            console.log(`Found Python at: ${stdout.trim()}`);
-            
-            // Execute the Python script with the found Python command
-            exec(`${pythonCommand} "${scriptPath}" "${startDate}" "${endDate}" "${country}"`,  
-                { cwd: path.join(__dirname, '..') }, 
-                handlePythonOutput);
-        }
-    });
+    console.log('Running setup command:', setupCommand);
     
-    // Handle Python script output
-    function handlePythonOutput(error, stdout, stderr) {
+    exec(setupCommand, { cwd: path.join(__dirname, '..') }, (error, stdout, stderr) => {
         // Log all outputs for debugging
         console.log('Python stdout:', stdout);
         if (stderr) {
             console.error('Python stderr:', stderr);
+        }
+        
+        // Clean up the temporary virtual environment
+        try {
+            exec(`rm -rf ${tempVenvDir}`);
+            console.log('Cleaned up temporary virtual environment');
+        } catch (cleanupError) {
+            console.error('Error cleaning up virtual environment:', cleanupError);
         }
         
         if (error) {
@@ -455,5 +451,5 @@ exports.calculateAllHistory = (req, res) => {
                 message: 'Error parsing snowfall data. Please try again.'
             });
         }
-    }
+    });
 };
