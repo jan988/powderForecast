@@ -336,13 +336,13 @@ exports.getAllHistoryData = (req, res) => {
 exports.calculateAllHistory = (req, res) => {
     const startDate = req.body.startDate;
     const endDate = req.body.endDate;
-    const country = req.body.country || 'all';  // Add country parameter with default 'all'
+    const country = req.body.country || 'all';
 
     console.log('Received parameters:', { startDate, endDate, country });
-
-
-    
-    
+    console.log('Environment variables:', {
+        VIRTUAL_ENV: process.env.VIRTUAL_ENV,
+        PATH: process.env.PATH
+    });
 
     // Input validation
     if (!startDate || !endDate) {
@@ -359,24 +359,45 @@ exports.calculateAllHistory = (req, res) => {
 
     // Construct the absolute path to the Python script
     const scriptPath = path.join(__dirname, '..', 'calculateAllHistory.py');
+    const csvPath = path.join(__dirname, '..', 'filtered_weather_data.csv');
     
     console.log('Executing Python script:', scriptPath);
+    console.log('CSV path:', csvPath);
+    console.log('Current working directory:', process.cwd());
+    
+    // Check if the CSV file exists
+    if (!fs.existsSync(csvPath)) {
+        console.error('CSV file not found at path:', csvPath);
+        return res.status(500).json({ message: 'Data file not found' });
+    }
 
-
-    // Execute the Python script with the provided dates and country
-    exec(`python3 "${scriptPath}" ${startDate} ${endDate} ${country}`,  
+    // Use the virtual environment from environment variables or fallback to default
+    const pythonCommand = process.env.VIRTUAL_ENV 
+        ? path.join(process.env.VIRTUAL_ENV, 'bin', 'python3')
+        : 'python3';
+    
+    console.log('Using Python command:', pythonCommand);
+    
+    // Execute the Python script with proper error handling
+    exec(`${pythonCommand} "${scriptPath}" "${startDate}" "${endDate}" "${country}"`,  
         { 
             cwd: path.join(__dirname, '..'),
-            
-        },(error, stdout, stderr) => {
+            env: process.env  // Use the existing environment variables
+        }, (error, stdout, stderr) => {
+        
+        // Log all outputs for debugging
+        console.log('Python stdout:', stdout);
+        if (stderr) {
+            console.error('Python stderr:', stderr);
+        }
+        
         if (error) {
             console.error('Python script execution error:', error);
-            console.error('Stderr:', stderr);
-            return res.status(500).json({ message: 'Error calculating snowfall', error: error.message });
-        }
-
-        if (stderr) {
-            console.error('Python script stderr:', stderr);
+            return res.status(500).json({ 
+                message: 'Error calculating snowfall', 
+                error: error.message,
+                stderr: stderr
+            });
         }
 
         try {
@@ -387,8 +408,6 @@ exports.calculateAllHistory = (req, res) => {
             for (const line of lines) {
                 if (!line.startsWith('Location:')) continue;
                 
-                console.log('Processing line:', line); // Debug log
-                
                 // Parse the line using more robust string manipulation
                 const parts = line.split(', ');
                 if (parts.length >= 4) {
@@ -396,8 +415,6 @@ exports.calculateAllHistory = (req, res) => {
                     const avgSnowfall = parseFloat(parts[1].replace('Avg Snowfall:', '').trim());
                     const totalSnowfall = parseFloat(parts[2].replace('Total Snowfall:', '').trim());
                     const country = parts[3].replace('Country:', '').trim();
-
-                    console.log('Parsed data:', { location, avgSnowfall, totalSnowfall, country }); // Debug log
 
                     if (location && !isNaN(avgSnowfall) && !isNaN(totalSnowfall)) {
                         results.push({
@@ -409,8 +426,6 @@ exports.calculateAllHistory = (req, res) => {
                     }
                 }
             }
-
-            console.log('Final results:', results); // Debug log
 
             if (results.length > 0) {
                 res.json({ results });
@@ -424,10 +439,9 @@ exports.calculateAllHistory = (req, res) => {
             }
         } catch (parseError) {
             console.error('Error parsing output:', parseError);
-            res.status(500).json({
-                message: 'Error parsing snowfall data',
-                error: parseError.message,
-                debug: stdout
+            res.json({
+                results: [],
+                message: 'Error parsing snowfall data. Please try again.'
             });
         }
     });
